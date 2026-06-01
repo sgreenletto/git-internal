@@ -482,7 +482,7 @@ impl PackEncoder {
     ) -> Result<Vec<(Vec<u8>, IndexEntry)>, GitError> {
         let mut current_offset = 0usize;
         let mut window: VecDeque<(Entry, usize)> = VecDeque::with_capacity(window_size);
-        let mut res: Vec<(Vec<u8>, IndexEntry)> = Vec::new();
+        let mut res: Vec<(Vec<u8>, IndexEntry)> = Vec::with_capacity(bucket.len());
         //let mut idx_entries: Vec<IndexEntry> = Vec::new();
 
         for entry in bucket.iter_mut() {
@@ -584,8 +584,9 @@ impl PackEncoder {
             if window.len() > window_size {
                 window.pop_front();
             }
-            res.push((obj_data.clone(), IndexEntry::new(entry, 0)));
-            current_offset += obj_data.len();
+            let obj_data_len = obj_data.len();
+            res.push((obj_data, IndexEntry::new(entry, 0)));
+            current_offset += obj_data_len;
         }
         Ok(res)
     }
@@ -786,6 +787,55 @@ mod tests {
         tracing::debug!("start check format");
         p.decode(&mut reader, |_| {}, None::<fn(ObjectHash)>)
             .expect("pack file format error");
+    }
+
+    fn blob_entries(contents: &[&str]) -> Vec<Entry> {
+        contents
+            .iter()
+            .map(|content| Blob::from_content(content).into())
+            .collect()
+    }
+
+    #[test]
+    fn test_try_as_offset_delta_keeps_one_result_per_input() {
+        let _guard = set_hash_kind_for_test(HashKind::Sha1);
+        let entries = blob_entries(&["alpha", "beta", "gamma", "delta"]);
+        let expected_hashes: Vec<ObjectHash> = entries.iter().map(|entry| entry.hash).collect();
+
+        let result = PackEncoder::try_as_offset_delta(entries, 0, false).unwrap();
+
+        assert_eq!(result.len(), expected_hashes.len());
+        for ((_, index_entry), expected_hash) in result.iter().zip(expected_hashes) {
+            assert_eq!(index_entry.hash, expected_hash);
+            assert_eq!(index_entry.offset, 0);
+        }
+    }
+
+    #[test]
+    fn test_try_as_offset_delta_matches_encode_one_object_without_delta_window() {
+        let _guard = set_hash_kind_for_test(HashKind::Sha1);
+        let entries = blob_entries(&["same path one", "same path two", "unrelated content"]);
+        let expected: Vec<(Vec<u8>, IndexEntry)> = entries
+            .iter()
+            .map(|entry| {
+                (
+                    encode_one_object(entry, None).unwrap(),
+                    IndexEntry::new(entry, 0),
+                )
+            })
+            .collect();
+
+        let result = PackEncoder::try_as_offset_delta(entries, 0, false).unwrap();
+
+        assert_eq!(result.len(), expected.len());
+        for ((actual_data, actual_index), (expected_data, expected_index)) in
+            result.iter().zip(expected.iter())
+        {
+            assert_eq!(actual_data, expected_data);
+            assert_eq!(actual_index.hash, expected_index.hash);
+            assert_eq!(actual_index.crc32, expected_index.crc32);
+            assert_eq!(actual_index.offset, expected_index.offset);
+        }
     }
 
     #[tokio::test]

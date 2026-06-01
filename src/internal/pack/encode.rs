@@ -448,7 +448,7 @@ impl PackEncoder {
 
         let mut all_res = vec![commit_res, tree_res, blob_res, tag_res];
 
-        let mut idx_entries = Vec::new();
+        let mut idx_entries = Vec::with_capacity(self.object_number);
         for res in &mut all_res {
             for data in res {
                 data.1.offset = self.inner_offset as u64;
@@ -613,7 +613,7 @@ impl PackEncoder {
             ));
         }
 
-        let mut idx_entries = Vec::new();
+        let mut idx_entries = Vec::with_capacity(self.object_number);
         let batch_size = usize::max(1000, entry_rx.max_capacity() / 10); // A temporary value, not optimized
         tracing::info!("encode with batch size: {}", batch_size);
         loop {
